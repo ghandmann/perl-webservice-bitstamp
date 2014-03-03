@@ -1,0 +1,6 @@
+Changes
+Makefile.PL
+MANIFEST
+README
+t/WebService-Bitstamp.t
+lib/WebService/Bitstamp.pm
