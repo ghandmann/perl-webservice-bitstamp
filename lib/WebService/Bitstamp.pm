@@ -1,34 +1,70 @@
 package WebService::Bitstamp;
 
-use 5.014002;
-use strict;
-use warnings;
-
-require Exporter;
-
-our @ISA = qw(Exporter);
-
-# Items to export into callers namespace by default. Note: do not export
-# names by default without a very good reason. Use EXPORT_OK instead.
-# Do not simply export all your public functions/methods/constants.
-
-# This allows declaration	use WebService::Bitstamp ':all';
-# If you do not need this, moving things directly into @EXPORT or @EXPORT_OK
-# will save memory.
-our %EXPORT_TAGS = ( 'all' => [ qw(
-	
-) ] );
-
-our @EXPORT_OK = ( @{ $EXPORT_TAGS{'all'} } );
-
-our @EXPORT = qw(
-	
-);
+use Mojo::Base "Mojo::EventEmitter";
+use Mojo::UserAgent;
 
 our $VERSION = '0.01';
 
+has 'ua' => sub { Mojo::UserAgent->new(); };
 
-# Preloaded methods go here.
+sub connect {
+	my $self = shift;
+	$self->ua->inactivity_timeout(0);
+
+	$self->ua->on(error => sub {
+		my ($tx, $error) = @_;
+		die " * FATAL: $error";
+	});
+
+	$self->ua->websocket("ws://ws.pusherapp.com/app/de504dc5763aeef9ff52?protocol=5" => sub {
+		my ($ua, $tx) = @_;
+
+		say 'WebSocket handshake failed!' and return unless $tx->is_websocket;
+
+		$tx->on(error => sub {
+			my ($tx, $error) = @_;
+			say "*** ERROR: $error";
+		});
+
+		$tx->on(finish => sub {
+			my ($tx, $code, $reason) = @_;
+			$reason //= "Unknown reason!";
+			say "WebSocket closed with status $code and reason: $reason.";
+		});
+
+		$tx->on(message => $self->on_message);
+		$tx->on(trade => $self->on_trade);
+		
+		$tx->send({
+				json => {
+				event => "pusher:subscribe",
+				data => { channel => "live_trades" },
+			}
+		});
+	});
+}
+
+sub on_message {
+	my ($tx, $msg) = @_;
+	my $data = j($msg);
+	given ($data->{event}) {
+		when ("pusher:connection_established") { say " * Connected to API" }
+		when ("pusher_internal:subscription_succeeded") { say " * Subscribed to channel " . $data->{channel} }
+		when ("trade") { $tx->emit("trade", $data); }
+		default { say " * UNHANDLED MSG: " . Dumper $data }
+	}
+}
+
+sub on_trade {
+	my ($tx, $msg) = @_;
+	my $trade = j($msg->{data});
+
+	my ($price, $amount) = ($trade->{price}, $trade->{amount});
+
+	my $trend = "Unknown";
+
+	printf(' * Trade: %.3fBTC @ $%.2f - '."$trend\n", $amount, $price);
+}
 
 1;
 __END__
